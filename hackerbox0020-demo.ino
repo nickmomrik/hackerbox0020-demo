@@ -2,7 +2,9 @@
   Demo which combines several of the individual demos from
   http://www.instructables.com/id/HackerBoxes-0020-Summer-Camp/
 
-  SD Card code was a big help from https://github.com/lmarty/Hackerboxes20
+  SD Card code from https://github.com/nhatuan84/esp32-micro-sdcard
+
+  bmpDraw from https://github.com/adafruit/Adafruit_ILI9341/
 
   http://www.arduino.cc/en/Tutorial/TFTBitmapLogo
  */
@@ -13,6 +15,9 @@
 #include "Adafruit_ILI9341.h"
 #include "Adafruit_NeoPixel.h"
 #include <mySD.h>
+
+// For reading BMPs
+#define BUFFPIXEL 20
 
 // Pins
 #define PIEZO_PIN     18
@@ -38,12 +43,13 @@
 
 int pixelCount = 5;
 int touchThreshold = 40;
-char logoFile[] = "hackerboxes-logo.bmp";
+// Filenames must be 8 characters or less!
+char logoFile[] = "logo.bmp";
+char rwFile[] = "example.txt";
 
 // SD Card
-Sd2Card card;
-SdVolume volume;
-SdFile root;
+File root;
+bool sd_init = false;
 
 // Touch states
 bool touch1 = false;
@@ -75,7 +81,18 @@ Adafruit_NeoPixel strip = Adafruit_NeoPixel( pixelCount, NEOPIXEL_PIN, NEO_GRB +
 Adafruit_ILI9341 tft = Adafruit_ILI9341( TFT_CS_PIN, TFT_DC_PIN, TFT_MOSI_PIN, TFT_CLK_PIN, TFT_RST_PIN, TFT_MISO_PIN );
 
 void setup() {
+  Serial.begin( 115200 );
+
   pinMode( PIEZO_PIN, OUTPUT );
+
+  tft.begin();
+  yield();
+  tft.setRotation( 3 ); // rotate 3 * ( pi / 2 )
+
+  strip.begin();
+  strip.setBrightness( 128 );
+
+  delay( 2000 );
 
   touchAttachInterrupt( TOUCH1_PIN, touchLeft, touchThreshold );
   touchAttachInterrupt( TOUCH2_PIN, touchRight, touchThreshold );
@@ -83,53 +100,57 @@ void setup() {
   touchAttachInterrupt( TOUCH4_PIN, touchDown, touchThreshold );
   touchAttachInterrupt( TOUCH5_PIN, touchLoner, touchThreshold );
 
-  tft.begin();
-  tft.setRotation( 3 ); // rotate 3 * ( pi / 2 )
-
-  strip.begin();
-  strip.setBrightness( 128 );
-  strip.clear();
-  strip.show();
-
-  Serial.begin( 115200 );
-
-  delay( 2000 );
-  Serial.print( "Initializing SD card..." );
-  if ( ! card.init( SPI_HALF_SPEED, SD_CS_PIN, SD_MOSI_PIN, SD_MISO_PIN, SD_SCK_PIN ) ) {
-    Serial.println( " failed!" );
-  } else {
-    Serial.println( " success!" );
-  }
+  maybe_initialize_sd_card();
 
   display_logo();
+
+  delay( 5000 );
+
+  black_out();
+  tft.setCursor( 0, 30 );
+  tft.setTextColor( ILI9341_BLUE );
+  tft.setTextSize( 3 );
+  tft.println( "      TOUCH" );
+  tft.println( " " );
+  tft.println( "        A" );
+  tft.println( " " );
+  tft.println( "       PAD" );
+  tft.println( " " );
+  tft.println( "       ..." );
 }
 
 void loop() {
   if ( touch1 ) {
+    black_out();
     // Read int from file, increment, and write it back for next read
+    //rwFile
 
     touch1 = false;
   }
 
   if ( touch2 ) {
+    black_out();
     ImperialMarch();
 
     touch2 = false;
   }
 
   if ( touch3 ) {
-    sd_info();
+    black_out();
+    display_logo();
 
     touch3 = false;
   }
 
   if ( touch4 ) {
+    black_out();
     rainbowCycle( 5 );
 
     touch4 = false;
   }
 
   if ( touch5 ) {
+    black_out();
     wifiScan2LCD();
 
     touch5 = false;
@@ -225,7 +246,6 @@ void wifiScan2LCD() {
   int netsfound;
   int displaylines = 13;
   
-  tft.fillScreen( ILI9341_BLACK );
   tft.setCursor( 0, 0 );
   tft.setTextColor( ILI9341_YELLOW );
   tft.setTextSize( 3 );
@@ -243,10 +263,9 @@ void wifiScan2LCD() {
 
   for ( int i = 0; i < netsfound; ++i ) {
     // Print SSID and RSSI for each network found
-    tft.print( " " );
     tft.print( WiFi.RSSI( i ) );
     tft.print( " " );
-    tft.print( WiFi.SSID( i ).substring( 0, 19 ) );
+    tft.print( WiFi.SSID( i ).substring( 0, 21 ) );
     tft.println( ( WiFi.encryptionType( i ) == WIFI_AUTH_OPEN ) ? "" : "*" );
     delay( 50 );
     displaylines--;
@@ -254,54 +273,229 @@ void wifiScan2LCD() {
 }
 
 void display_logo() {
-  //logoFile;
+  maybe_initialize_sd_card();
+  bmpDraw( logoFile, 0, 0 );
 }
 
-void sd_info() {
+void black_out() {
+  strip.clear();
+  strip.show();
+
   tft.fillScreen( ILI9341_BLACK );
-  tft.setCursor( 0, 0 );
-  tft.setTextColor( ILI9341_GREEN );
-  tft.setTextSize( 2 );
-  tft.print( " Card type: " );
-  switch( card.type() ) {
-    case SD_CARD_TYPE_SD1:
-      tft.println( "SD1" );
-      break;
-    case SD_CARD_TYPE_SD2:
-      tft.println( "SD2" );
-      break;
-    case SD_CARD_TYPE_SDHC:
-      tft.println( "SDHC" );
-      break;
-    default:
-      tft.println( "Unknown" );
+}
+
+void maybe_initialize_sd_card() {
+  if ( ! sd_init ) {
+    Serial.print( "Initializing SD card..." );
+    if ( ! SD.begin( SD_CS_PIN, SD_MOSI_PIN, SD_MISO_PIN, SD_SCK_PIN ) ) {
+      Serial.println( "failed!");
+    } else {
+      sd_init = true;
+      Serial.println( "success!" );
+
+      root = SD.open( "/" );
+      printDirectory( root, 0 );
+    }
+  }
+}
+
+void printDirectory( File dir, int numTabs ) {
+  // Begin at the start of the directory
+  //dir.rewindDirectory();
+  
+  while ( true ) {
+     File entry = dir.openNextFile();
+     if ( ! entry ) {
+       Serial.println( "** No more files **" );
+       break;
+     }
+     for ( uint8_t i = 0; i < numTabs; i++ ) {
+       Serial.print( "\t" );   // we'll have a nice indentation
+     }
+     // Print the 8.3 name
+     Serial.print( entry.name() );
+     // Recurse for directories, otherwise print the file size
+     if ( entry.isDirectory() ) {
+       Serial.println( "/" );
+       printDirectory( entry, numTabs + 1 );
+     } else {
+       // files have sizes, directories do not
+       Serial.print( "\t\t" );
+       Serial.println( entry.size(), DEC );
+     }
+     entry.close();
+   }
+}
+
+// This function opens a Windows Bitmap (BMP) file and
+// displays it at the given coordinates.  It's sped up
+// by reading many pixels worth of data at a time
+// (rather than pixel by pixel).  Increasing the buffer
+// size takes more of the Arduino's precious RAM but
+// makes loading a little faster.  20 pixels seems a
+// good balance.
+
+void bmpDraw( char *filename, int16_t x, int16_t y ) {
+  File     bmpFile;
+  int      bmpWidth, bmpHeight;          // W+H in pixels
+  uint8_t  bmpDepth;                     // Bit depth (currently must be 24)
+  uint32_t bmpImageoffset;               // Start of image data in file
+  uint32_t rowSize;                      // Not always = bmpWidth; may have padding
+  uint8_t  sdbuffer[3*BUFFPIXEL];        // pixel buffer (R+G+B per pixel)
+  uint8_t  buffidx = sizeof( sdbuffer ); // Current position in sdbuffer
+  boolean  goodBmp = false;              // Set to true on valid header parse
+  boolean  flip    = true;               // BMP is stored bottom-to-top
+  int      w, h, row, col, x2, y2, bx1, by1;
+  uint8_t  r, g, b;
+  uint32_t pos = 0, startTime = millis();
+
+  if ( ( x >= tft.width() ) || ( y >= tft.height() ) ) {
+    return;
   }
 
-  if ( ! volume.init( card ) ) {
-    tft.println( " " );
-    tft.println( " Could not find" );
-    tft.println( " FAT16/FAT32 partition." );
-    tft.println( " Make sure you've" );
-    tft.println( " formatted the card" );
-    tft.println( " or reset the board." );
+  Serial.println();
+  Serial.print( F( "Loading image fram " ) );
+  Serial.println( filename );
+
+  // Open requested file on SD card
+  bmpFile = SD.open( filename );
+  if ( ! bmpFile ) {
+    Serial.println( F( "File not found!" ) );
 
     return;
   }
 
-  // print the type and size of the first FAT-type volume
-  uint32_t volumesize;
-  float volumesize_f;
-  tft.print( " Volume type: FAT");
-  tft.println( volume.fatType(), DEC );
+  // Parse BMP header
+  if ( read16( bmpFile ) == 0x4D42) { // BMP signature
+    Serial.print( F( "File size: " ) );
+    Serial.println( read32( bmpFile ) );
+    (void) read32( bmpFile ); // Read & ignore creator bytes
+    bmpImageoffset = read32( bmpFile ); // Start of image data
+    Serial.print( F( "Image Offset: " ) );
+    Serial.println( bmpImageoffset, DEC );
+    // Read DIB header
+    Serial.print( F( "Header size: " ) );
+    Serial.println( read32( bmpFile ) );
+    bmpWidth  = read32( bmpFile );
+    bmpHeight = read32( bmpFile );
+    if ( read16( bmpFile ) == 1 ) { // # planes -- must be '1'
+      bmpDepth = read16( bmpFile ); // bits per pixel
+      Serial.print( F( "Bit Depth: " ) );
+      Serial.println( bmpDepth );
+      if ( ( bmpDepth == 24 ) && ( read32( bmpFile ) == 0 ) ) { // 0 = uncompressed
 
-  volumesize = volume.blocksPerCluster();   // clusters are collections of blocks
-  volumesize *= volume.clusterCount();      // we'll have a lot of clusters
-  volumesize *= 512;                        // SD card blocks are always 512 bytes
-  volumesize_f = volumesize / 1024.0;       // Convert to bytes
-  volumesize_f /= 1024;                     // Convert to Mbytes
-  volumesize_f /= 1024;                     // Convert to Gbytes
-  tft.print( " Volume size: " );
-  tft.print( volumesize_f );
-  tft.println( " GB" );
+        goodBmp = true; // Supported BMP format -- proceed!
+        Serial.print( F( "Image size: " ) );
+        Serial.print( bmpWidth );
+        Serial.print( 'x' );
+        Serial.println( bmpHeight );
+
+        // BMP rows are padded (if needed) to 4-byte boundary
+        rowSize = ( bmpWidth * 3 + 3 ) & ~3;
+
+        // If bmpHeight is negative, image is in top-down order.
+        // This is not canon but has been observed in the wild.
+        if ( bmpHeight < 0 ) {
+          bmpHeight = -bmpHeight;
+          flip      = false;
+        }
+
+        // Crop area to be loaded
+        x2 = x + bmpWidth  - 1; // Lower-right corner
+        y2 = y + bmpHeight - 1;
+        if ( ( x2 >= 0 ) && ( y2 >= 0 ) ) { // On screen?
+          w = bmpWidth; // Width/height of section to load/display
+          h = bmpHeight;
+          bx1 = by1 = 0; // UL coordinate in BMP file
+          if ( x < 0 ) { // Clip left
+            bx1 = -x;
+            x   = 0;
+            w   = x2 + 1;
+          }
+          if ( y < 0 ) { // Clip top
+            by1 = -y;
+            y   = 0;
+            h   = y2 + 1;
+          }
+          if ( x2 >= tft.width() ) {
+            w = tft.width()  - x; // Clip right
+          }
+          if ( y2 >= tft.height() ) {
+            h = tft.height() - y; // Clip bottom
+          }
+  
+          // Set TFT address window to clipped image bounds
+          tft.startWrite(); // Requires start/end transaction now
+          tft.setAddrWindow( x, y, w, h );
+  
+          for ( row = 0; row < h; row++ ) { // For each scanline...
+            // Seek to start of scan line.  It might seem labor-
+            // intensive to be doing this on every line, but this
+            // method covers a lot of gritty details like cropping
+            // and scanline padding.  Also, the seek only takes
+            // place if the file position actually needs to change
+            // (avoids a lot of cluster math in SD library).
+            if ( flip ) { // Bitmap is stored bottom-to-top order (normal BMP)
+              pos = bmpImageoffset + ( bmpHeight - 1 - ( row + by1 ) ) * rowSize;
+            } else {     // Bitmap is stored top-to-bottom
+              pos = bmpImageoffset + ( row + by1 ) * rowSize;
+            }
+            pos += bx1 * 3; // Factor in starting column (bx1)
+            if ( bmpFile.position() != pos ) { // Need seek?
+              tft.endWrite(); // End TFT transaction
+              bmpFile.seek( pos );
+              buffidx = sizeof( sdbuffer ); // Force buffer reload
+              tft.startWrite(); // Start new TFT transaction
+            }
+            for ( col=0; col<w; col++ ) { // For each pixel...
+              // Time to read more pixel data?
+              if ( buffidx >= sizeof( sdbuffer ) ) { // Indeed
+                tft.endWrite(); // End TFT transaction
+                bmpFile.read( sdbuffer, sizeof( sdbuffer ) );
+                buffidx = 0; // Set index to beginning
+                tft.startWrite(); // Start new TFT transaction
+              }
+              // Convert pixel from BMP to TFT format, push to display
+              b = sdbuffer[buffidx++];
+              g = sdbuffer[buffidx++];
+              r = sdbuffer[buffidx++];
+              tft.writePixel( tft.color565( r,g,b ) );
+            } // end pixel
+          } // end scanline
+          tft.endWrite(); // End last TFT transaction
+        } // end onscreen
+        Serial.print( F( "Loaded in " ) );
+        Serial.print( millis() - startTime );
+        Serial.println( " ms" );
+      } // end goodBmp
+    }
+  }
+
+  bmpFile.close();
+  if ( ! goodBmp ) {
+    Serial.println( F( "BMP format not recognized." ) );
+  }
+}
+
+// These read 16- and 32-bit types from the SD card file.
+// BMP data is stored little-endian, Arduino is little-endian too.
+// May need to reverse subscript order if porting elsewhere.
+
+uint16_t read16( File &f ) {
+  uint16_t result;
+  ( (uint8_t *)&result )[0] = f.read(); // LSB
+  ( (uint8_t *)&result )[1] = f.read(); // MSB
+
+  return result;
+}
+
+uint32_t read32( File &f ) {
+  uint32_t result;
+  ( (uint8_t *)&result )[0] = f.read(); // LSB
+  ( (uint8_t *)&result )[1] = f.read();
+  ( (uint8_t *)&result )[2] = f.read();
+  ( (uint8_t *)&result )[3] = f.read(); // MSB
+
+  return result;
 }
 
