@@ -44,12 +44,14 @@
 int pixelCount = 5;
 int touchThreshold = 40;
 // Filenames must be 8 characters or less!
-char logoFile[] = "logo.bmp";
-char rwFile[] = "example.txt";
+char logoFilename[] = "logo.bmp";
+char rwFilename[] = "example.txt";
 
 // SD Card
 File root;
-bool sd_init = false;
+File example;
+bool sd_ready = false;
+String buffer;
 
 // Touch states
 bool touch1 = false;
@@ -100,8 +102,6 @@ void setup() {
   touchAttachInterrupt( TOUCH4_PIN, touchDown, touchThreshold );
   touchAttachInterrupt( TOUCH5_PIN, touchLoner, touchThreshold );
 
-  maybe_initialize_sd_card();
-
   display_logo();
 
   delay( 5000 );
@@ -122,8 +122,7 @@ void setup() {
 void loop() {
   if ( touch1 ) {
     black_out();
-    // Read int from file, increment, and write it back for next read
-    //rwFile
+    rw_sd_card();
 
     touch1 = false;
   }
@@ -274,7 +273,8 @@ void wifiScan2LCD() {
 
 void display_logo() {
   maybe_initialize_sd_card();
-  bmpDraw( logoFile, 0, 0 );
+
+  bmpDraw( logoFilename, 0, 0 );
 }
 
 void black_out() {
@@ -285,16 +285,18 @@ void black_out() {
 }
 
 void maybe_initialize_sd_card() {
-  if ( ! sd_init ) {
+  if ( ! sd_ready ) {
     Serial.print( "Initializing SD card..." );
     if ( ! SD.begin( SD_CS_PIN, SD_MOSI_PIN, SD_MISO_PIN, SD_SCK_PIN ) ) {
       Serial.println( "failed!");
     } else {
-      sd_init = true;
+      sd_ready = true;
       Serial.println( "success!" );
 
+      /*
       root = SD.open( "/" );
       printDirectory( root, 0 );
+      */
     }
   }
 }
@@ -310,7 +312,7 @@ void printDirectory( File dir, int numTabs ) {
        break;
      }
      for ( uint8_t i = 0; i < numTabs; i++ ) {
-       Serial.print( "\t" );   // we'll have a nice indentation
+       Serial.print( '\t' );   // we'll have a nice indentation
      }
      // Print the 8.3 name
      Serial.print( entry.name() );
@@ -325,6 +327,68 @@ void printDirectory( File dir, int numTabs ) {
      }
      entry.close();
    }
+}
+
+void rw_sd_card() {
+  maybe_initialize_sd_card();
+
+  if ( ! sd_ready ) {
+    Serial.println( "SD Card not ready" );
+
+    return;
+  }
+
+  if ( ! SD.exists( rwFilename ) ) {
+    Serial.print( "Creating " );
+    Serial.println( rwFilename );
+    example = SD.open( rwFilename, FILE_WRITE );
+    example.close();
+
+    if ( ! SD.exists( rwFilename ) ) {
+      Serial.print( "Error creating " );
+      Serial.println( rwFilename );
+
+      return;
+    }
+  }
+
+  tft.setCursor( 0, 0 );
+  tft.setTextColor( ILI9341_YELLOW );
+  tft.setTextSize( 3 );
+  
+  example = SD.open( rwFilename );
+  if ( example ) {
+    int i = 0;
+    while ( example.available() ) {
+      buffer = example.readStringUntil( '\n' );
+      tft.print( " " );
+      tft.println( buffer );
+      delay( 200 );
+
+      i++;
+      if ( 10 == i ) {
+        black_out();
+        tft.setCursor( 0, 0 );
+        i = 0;
+      }
+    }
+
+    example.close();
+
+    example = SD.open( rwFilename, FILE_WRITE );
+    if ( example ) {
+      example.println( millis() );
+      example.close();
+    } else {
+      Serial.print( "Error opening " );
+      Serial.print( rwFilename );
+      Serial.print( " for writing." );
+    }
+  } else {
+    Serial.print( "Error opening " );
+    Serial.print( rwFilename );
+    Serial.print( " for reading." );
+  }
 }
 
 // This function opens a Windows Bitmap (BMP) file and
@@ -348,6 +412,12 @@ void bmpDraw( char *filename, int16_t x, int16_t y ) {
   int      w, h, row, col, x2, y2, bx1, by1;
   uint8_t  r, g, b;
   uint32_t pos = 0, startTime = millis();
+
+  if ( ! sd_ready ) {
+    Serial.println( "SD Card not ready" );
+
+    return;
+  }
 
   if ( ( x >= tft.width() ) || ( y >= tft.height() ) ) {
     return;
