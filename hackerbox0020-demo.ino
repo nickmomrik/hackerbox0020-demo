@@ -1,30 +1,49 @@
-// Demo which combines several of the individual demos from
-// http://www.instructables.com/id/HackerBoxes-0020-Summer-Camp/
+/* 
+  Demo which combines several of the individual demos from
+  http://www.instructables.com/id/HackerBoxes-0020-Summer-Camp/
 
-#include <Adafruit_NeoPixel.h>
+  SD Card code was a big help from https://github.com/lmarty/Hackerboxes20
+
+  http://www.arduino.cc/en/Tutorial/TFTBitmapLogo
+ */
+
 #include "WiFi.h"
 #include "SPI.h"
 #include "Adafruit_GFX.h"
 #include "Adafruit_ILI9341.h"
+#include "Adafruit_NeoPixel.h"
+#include <mySD.h>
 
 // Pins
-#define buzzerPin 18
-#define touch1Pin 12
-#define touch2Pin 13
-#define touch3Pin 14
-#define touch4Pin 27
-#define touch5Pin 15
-#define ledPIN     5
-#define TFT_CS    19
-#define TFT_DC    22
-#define TFT_MOSI  23
-#define TFT_CLK   26
-#define TFT_RST   21
-#define TFT_MISO  25
+#define PIEZO_PIN     18
+#define NEOPIXEL_PIN   5
 
-int touchThreshold = 40;
+#define TOUCH1_PIN    12
+#define TOUCH2_PIN    13
+#define TOUCH3_PIN    14
+#define TOUCH4_PIN    27
+#define TOUCH5_PIN    15
+
+#define TFT_CLK_PIN   26
+#define TFT_CS_PIN    19
+#define TFT_DC_PIN    22
+#define TFT_MISO_PIN  25
+#define TFT_MOSI_PIN  23
+#define TFT_RST_PIN   21
+
+#define SD_CS_PIN     17
+#define SD_MISO_PIN    4
+#define SD_MOSI_PIN   16
+#define SD_SCK_PIN     0
+
 int pixelCount = 5;
-int lux = 20;
+int touchThreshold = 40;
+char logoFile[] = "hackerboxes-logo.bmp";
+
+// SD Card
+Sd2Card card;
+SdVolume volume;
+SdFile root;
 
 // Touch states
 bool touch1 = false;
@@ -51,66 +70,70 @@ const int e7 = 2637;
 const int f7 = 2794;
 const int g7 = 3136;
 
-Adafruit_NeoPixel strip = Adafruit_NeoPixel( pixelCount, ledPIN, NEO_GRB + NEO_KHZ800 );
+Adafruit_NeoPixel strip = Adafruit_NeoPixel( pixelCount, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800 );
 
-char ssid[] = "nickmomrik";  //put your handle after the underscore
-Adafruit_ILI9341 tft = Adafruit_ILI9341( TFT_CS, TFT_DC, TFT_MOSI, TFT_CLK, TFT_RST, TFT_MISO );
+Adafruit_ILI9341 tft = Adafruit_ILI9341( TFT_CS_PIN, TFT_DC_PIN, TFT_MOSI_PIN, TFT_CLK_PIN, TFT_RST_PIN, TFT_MISO_PIN );
 
 void setup() {
-  pinMode( buzzerPin, OUTPUT );
+  pinMode( PIEZO_PIN, OUTPUT );
 
-  touchAttachInterrupt( touch1Pin, touchLeft, touchThreshold );
-  touchAttachInterrupt( touch2Pin, touchRight, touchThreshold );
-  touchAttachInterrupt( touch3Pin, touchUp, touchThreshold );
-  touchAttachInterrupt( touch4Pin, touchDown, touchThreshold );
-  touchAttachInterrupt( touch5Pin, touchLoner, touchThreshold );
-
-  strip.begin();
-  delay( 1000 );
+  touchAttachInterrupt( TOUCH1_PIN, touchLeft, touchThreshold );
+  touchAttachInterrupt( TOUCH2_PIN, touchRight, touchThreshold );
+  touchAttachInterrupt( TOUCH3_PIN, touchUp, touchThreshold );
+  touchAttachInterrupt( TOUCH4_PIN, touchDown, touchThreshold );
+  touchAttachInterrupt( TOUCH5_PIN, touchLoner, touchThreshold );
 
   tft.begin();
   tft.setRotation( 3 ); // rotate 3 * ( pi / 2 )
 
-  clearPixels();
+  strip.begin();
+  strip.setBrightness( 128 );
+  strip.clear();
+  strip.show();
+
+  Serial.begin( 115200 );
+
+  delay( 2000 );
+  Serial.print( "Initializing SD card..." );
+  if ( ! card.init( SPI_HALF_SPEED, SD_CS_PIN, SD_MOSI_PIN, SD_MISO_PIN, SD_SCK_PIN ) ) {
+    Serial.println( " failed!" );
+  } else {
+    Serial.println( " success!" );
+  }
+
+  display_logo();
 }
 
 void loop() {
   if ( touch1 ) {
-    MarioTheme();
+    // Read int from file, increment, and write it back for next read
+
     touch1 = false;
   }
 
   if ( touch2 ) {
     ImperialMarch();
+
     touch2 = false;
   }
 
   if ( touch3 ) {
-    rainbowCycle( 5 );
+    sd_info();
+
     touch3 = false;
   }
 
   if ( touch4 ) {
-    theaterChaseRainbow( 5 );
+    rainbowCycle( 5 );
+
     touch4 = false;
   }
 
   if ( touch5 ) {
     wifiScan2LCD();
-    // start broadcating SSID (AP on)
-    WiFi.softAP( ssid, NULL, 1, 0, 1 );
-    delay( 5000 );
-    WiFi.softAPdisconnect( 1 );
 
     touch5 = false;
   }
-}
-
-void clearPixels() {
-  for ( int i = 0; i < strip.numPixels(); i++ ) {
-    strip.setPixelColor( i, strip.Color( 0, 0, 0 ) );
-  }
-  strip.show();
 }
 
 void touchLeft() {
@@ -135,9 +158,9 @@ void touchLoner() {
 
 void beep( int tone, int duration ) {
   for ( long i = 0; i < duration * 900L; i += tone * 1 ) {
-    digitalWrite( buzzerPin, HIGH );
+    digitalWrite( PIEZO_PIN, HIGH );
     delayMicroseconds( 0.5 * tone );
-    digitalWrite( buzzerPin, LOW );
+    digitalWrite( PIEZO_PIN, LOW );
     delayMicroseconds( 0.5 * tone );
   }
 
@@ -166,47 +189,6 @@ void ImperialMarch() {
   beep( a, 650 );
 }
 
-void  MarioTheme() {
-  beep( e7, 150 );
-  beep( e7, 150 );
-  delay( 150 );
-  beep( e7, 150 );
-  delay( 150 );
-  beep( c7, 150 );
-  beep( e7, 150 );
-  delay( 150 );
-  beep( g7, 150 );
-  delay( 450 );
-  beep( g6, 150 );
-  delay( 450 );
-  beep( c7, 150 );
-  delay( 300 );
-  beep( g6, 150 );
-  delay( 300 );
-  beep( e6, 150 );
-  delay( 300 );
-  beep( a6, 150 );
-  delay( 150 );
-  beep( b6, 150 );
-  delay( 150 );
-  beep( as6, 150 );
-  beep( a6, 150 );
-  delay( 150 );
-  beep( g6, 112 );
-  beep( e7, 112 );
-  beep( g7, 112 );
-  beep( a6, 150 );
-  delay( 150 );
-  beep( f7, 150 );
-  beep( g7, 150 );
-  delay( 150 );
-  beep( e7, 150 );
-  delay( 150 );
-  beep( c7, 150 );
-  beep( d7, 150 );
-  beep( b6, 150 );
-}
-
 // Pixel functions taken from From the NeoPixel strandtest example
 void rainbowCycle( uint8_t wait ) {
   uint16_t i, j;
@@ -219,27 +201,8 @@ void rainbowCycle( uint8_t wait ) {
     delay( wait );
   }
 
-  clearPixels();
-}
-
-// Theatre-style crawling lights with rainbow effect
-void theaterChaseRainbow( uint8_t wait ) {
-  for ( int j = 0; j < 256; j++ ) {     // cycle all 256 colors in the wheel
-    for ( int q = 0; q < 3; q++ ) {
-      for ( uint16_t i = 0; i < strip.numPixels(); i = i + 3 ) {
-        strip.setPixelColor( i + q, Wheel( ( i + j ) % 255 ) );    //turn every third pixel on
-      }
-      strip.show();
-
-      delay( wait );
-
-      for ( uint16_t i = 0; i < strip.numPixels(); i = i + 3 ) {
-        strip.setPixelColor( i + q, 0 );        //turn every third pixel off
-      }
-    }
-  }
-
-  clearPixels();
+  strip.clear();
+  strip.show();
 }
 
 // Input a value 0 to 255 to get a color value.
@@ -270,7 +233,7 @@ void wifiScan2LCD() {
   tft.println( " WiFi Networks" );
   tft.setTextColor( ILI9341_GREEN );
   tft.setTextSize( 2 );
-  tft.println( " " );
+  tft.println( "" );
 
   netsfound = WiFi.scanNetworks();
   if ( netsfound == 0 ) {
@@ -280,13 +243,65 @@ void wifiScan2LCD() {
 
   for ( int i = 0; i < netsfound; ++i ) {
     // Print SSID and RSSI for each network found
-    tft.print( " [" );
+    tft.print( " " );
     tft.print( WiFi.RSSI( i ) );
-    tft.print( "] " );
-    tft.print( WiFi.SSID( i ).substring( 0, 17 ) );
-    tft.println( ( WiFi.encryptionType( i ) == WIFI_AUTH_OPEN ) ? " " : "*" );
+    tft.print( " " );
+    tft.print( WiFi.SSID( i ).substring( 0, 19 ) );
+    tft.println( ( WiFi.encryptionType( i ) == WIFI_AUTH_OPEN ) ? "" : "*" );
     delay( 50 );
     displaylines--;
   }
+}
+
+void display_logo() {
+  //logoFile;
+}
+
+void sd_info() {
+  tft.fillScreen( ILI9341_BLACK );
+  tft.setCursor( 0, 0 );
+  tft.setTextColor( ILI9341_GREEN );
+  tft.setTextSize( 2 );
+  tft.print( " Card type: " );
+  switch( card.type() ) {
+    case SD_CARD_TYPE_SD1:
+      tft.println( "SD1" );
+      break;
+    case SD_CARD_TYPE_SD2:
+      tft.println( "SD2" );
+      break;
+    case SD_CARD_TYPE_SDHC:
+      tft.println( "SDHC" );
+      break;
+    default:
+      tft.println( "Unknown" );
+  }
+
+  if ( ! volume.init( card ) ) {
+    tft.println( " " );
+    tft.println( " Could not find" );
+    tft.println( " FAT16/FAT32 partition." );
+    tft.println( " Make sure you've" );
+    tft.println( " formatted the card" );
+    tft.println( " or reset the board." );
+
+    return;
+  }
+
+  // print the type and size of the first FAT-type volume
+  uint32_t volumesize;
+  float volumesize_f;
+  tft.print( " Volume type: FAT");
+  tft.println( volume.fatType(), DEC );
+
+  volumesize = volume.blocksPerCluster();   // clusters are collections of blocks
+  volumesize *= volume.clusterCount();      // we'll have a lot of clusters
+  volumesize *= 512;                        // SD card blocks are always 512 bytes
+  volumesize_f = volumesize / 1024.0;       // Convert to bytes
+  volumesize_f /= 1024;                     // Convert to Mbytes
+  volumesize_f /= 1024;                     // Convert to Gbytes
+  tft.print( " Volume size: " );
+  tft.print( volumesize_f );
+  tft.println( " GB" );
 }
 
