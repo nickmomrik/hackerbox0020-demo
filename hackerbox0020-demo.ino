@@ -1,12 +1,12 @@
 /* 
-  Demo which combines several of the individual demos from
+  Demo which builds on several of the individual demos from
   http://www.instructables.com/id/HackerBoxes-0020-Summer-Camp/
 
-  SD Card code from https://github.com/nhatuan84/esp32-micro-sdcard
+  SD Card code from
+  https://github.com/nhatuan84/esp32-micro-sdcard
 
-  bmpDraw from https://github.com/adafruit/Adafruit_ILI9341/
-
-  http://www.arduino.cc/en/Tutorial/TFTBitmapLogo
+  bmpDraw from
+  https://github.com/adafruit/Adafruit_ILI9341/
  */
 
 #include "WiFi.h"
