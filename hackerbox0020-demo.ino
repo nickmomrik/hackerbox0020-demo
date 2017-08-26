@@ -14,7 +14,7 @@
 #include "Adafruit_GFX.h"
 #include "Adafruit_ILI9341.h"
 #include "Adafruit_NeoPixel.h"
-#include <mySD.h>
+#include "mySD.h"
 
 // For reading BMPs
 #define BUFFPIXEL 20
@@ -94,7 +94,7 @@ void setup() {
   strip.begin();
   strip.setBrightness( 128 );
 
-  delay( 2000 );
+  delay( 1000 );
 
   touchAttachInterrupt( TOUCH1_PIN, touchLeft, touchThreshold );
   touchAttachInterrupt( TOUCH2_PIN, touchRight, touchThreshold );
@@ -103,8 +103,6 @@ void setup() {
   touchAttachInterrupt( TOUCH5_PIN, touchLoner, touchThreshold );
 
   display_logo();
-
-  delay( 5000 );
 
   black_out();
   tft.setCursor( 0, 30 );
@@ -275,6 +273,8 @@ void display_logo() {
   maybe_initialize_sd_card();
 
   bmpDraw( logoFilename, 0, 0 );
+
+  delay( 3000 );
 }
 
 void black_out() {
